@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OceanEmbed — Operations Command & Subsurface Intelligence</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            800: '#1e293b',
+                            850: '#172033',
+                            900: '#0f172a',
+                            950: '#090d16',
+                        },
+                        cyan: {
+                            400: '#22d3ee',
+                            500: '#06b6d4',
+                            600: '#0891b2',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Leaflet Heat plugin -->
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+
+    <style>
+        body { margin: 0; padding: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        #root { width: 100vw; min-height: 100vh; }
+        .leaflet-container { background: #090d16; outline: none; }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.9); opacity: 0.8; }
+            50% { transform: scale(1.4); opacity: 0.2; }
+            100% { transform: scale(0.9); opacity: 0.8; }
+        }
+        .pulse-marker {
+            animation: pulse-ring 2s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased selection:bg-cyan-500 selection:text-white">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // Automatically resolve API origin (relative path when served by FastAPI, or fallback to port 8000)
+        const API_BASE = window.location.protocol.startsWith('http')
+            ? `${window.location.origin}/api/v1`
+            : 'http://localhost:8000/api/v1';
+
+        // -------------------------------------------------------------------
+        // HEADER COMPONENT
+        // -------------------------------------------------------------------
+        const Header = ({ backendConnected, leadTime, onExportNetCDF, exportingNc }) => {
+            const [time, setTime] = useState(new Date());
+
+            useEffect(() => {
+                const timer = setInterval(() => setTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            return (
+                <header className="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-6 py-3.5 sticky top-0 z-50 shadow-xl">
+                    <div className="max-w-[1720px] mx-auto flex flex-wrap justify-between items-center gap-4">
+                        <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center text-xl shadow-lg shadow-cyan-500/20">
+                                🌊
+                            </div>
+                            <div>
+                                <div className="flex items-center space-x-2">
+                                    <h1 className="text-lg font-bold text-white tracking-wide">OceanEmbed</h1>
+                                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                                        v1.0 Spatial-AI
+                                    </span>
+                                    <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                                        SIH26066
+                                    </span>
+                                </div>
+                                <p className="text-xs text-slate-400">Subsurface Thermal Forecasting & TCHP Hazard Defense System</p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center space-x-4 text-xs">
+                            <div className="hidden sm:flex items-center space-x-2 bg-slate-850 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300">
+                                <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                                <span>Domain: <strong className="text-white">North Indian Ocean (5°-25°N, 60°-95°E)</strong></span>
+                            </div>
+
+                            <div className="font-mono text-cyan-300 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 shadow-inner">
+                                {time.toISOString().replace('T', ' ').substring(0, 19)} UTC
+                            </div>
+
+                            <div className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border font-medium ${
+                                backendConnected 
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                            }`}>
+                                <span className={`w-2 h-2 rounded-full ${backendConnected ? 'bg-emerald-400 animate-ping' : 'bg-amber-400 animate-pulse'}`}></span>
+                                <span>{backendConnected ? 'Live Simulation Engine' : 'Offline Fallback Mode'}</span>
+                            </div>
+
+                            <button
+                                onClick={onExportNetCDF}
+                                disabled={exportingNc}
+                                className="flex items-center space-x-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-3.5 py-1.5 rounded-lg font-medium shadow-md shadow-cyan-600/20 transition-all active:scale-95 disabled:opacity-50"
+                                title="Download CF-1.8 NetCDF (.nc) file for numerical analysis"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                                </svg>
+                                <span>{exportingNc ? 'Exporting...' : `Export NetCDF (T+${leadTime})`}</span>
+                            </button>
+                        </div>
+                    </div>
+                </header>
+            );
+        };
+
+        // -------------------------------------------------------------------
+        // STATS METRICS CARDS
+        // -------------------------------------------------------------------
+        const StatCard = ({ title, value, unit, subtitle, icon, colorClass = "text-cyan-400" }) => (
+            <div className="bg-slate-900/90 rounded-xl border border-slate-800 p-4 shadow-lg flex items-center space-x-4 hover:border-slate-700 transition-colors">
+                <div className={`p-3 rounded-xl bg-slate-800/80 border border-slate-700/60 shadow-inner ${colorClass}`}>
+                    {icon}
+                </div>
+                <div className="flex-1 min-w-0">
+                    <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider truncate">{title}</p>
+                    <div className="flex items-baseline space-x-1.5 mt-0.5">
+                        <span className="text-2xl font-bold text-white tracking-tight">{value !== null && value !== undefined ? value : '--'}</span>
+                        <span className="text-slate-400 text-xs font-medium">{unit}</span>
+                    </div>
+                    {subtitle && <p className="text-[11px] text-slate-500 truncate mt-0.5">{subtitle}</p>}
+                </div>
+            </div>
+        );
+
+        // -------------------------------------------------------------------
+        // CONTROLS & LEAD TIME TOOLBAR
+        // -------------------------------------------------------------------
+        const ControlPanel = ({ 
+            leadTime, setLeadTime, 
+            activeOverlay, setActiveOverlay, 
+            showArgo, setShowArgo,
+            showRiskZones, setShowRiskZones,
+            quickLocations, onSelectLocation
+        }) => {
+            const times = [
+                { val: 0, label: "T+0", sub: "Nowcast" },
+                { val: 1, label: "T+1", sub: "+24h" },
+                { val: 3, label: "T+3", sub: "+72h" },
+                { val: 7, label: "T+7", sub: "+168h" },
+            ];
+
+            return (
+                <div className="bg-slate-900/90 rounded-xl border border-slate-800 p-4 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                    {/* Lead Time Selector */}
+                    <div className="flex items-center space-x-3">
+                        <span className="text-slate-400 text-xs font-bold uppercase tracking-wider flex items-center space-x-1">
+                            <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            <span>Lead Time:</span>
+                        </span>
+                        <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 shadow-inner">
+                            {times.map(t => (
+                                <button
+                                    key={t.val}
+                                    onClick={() => setLeadTime(t.val)}
+                                    className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+                                        leadTime === t.val 
+                                            ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md shadow-cyan-600/30' 
+                                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                                    }`}
+                                >
+                                    <span>{t.label}</span>
+                                    <span className="opacity-70 text-[10px]">({t.sub})</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Overlay Layer Toggles */}
+                    <div className="flex flex-wrap items-center gap-4 text-xs">
+                        <div className="flex items-center space-x-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                            <button
+                                onClick={() => setActiveOverlay('sst')}
+                                className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                                    activeOverlay === 'sst' 
+                                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' 
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                🌡️ Surface Temp (SST)
+                            </button>
+                            <button
+                                onClick={() => setActiveOverlay('tchp')}
+                                className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                                    activeOverlay === 'tchp' 
+                                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' 
+                                        : 'text-slate-400 hover:text-white'
+                                }`}
+                            >
+                                🌀 TCHP Cyclone Hazard
+                            </button>
+                        </div>
+
+                        <div className="h-6 w-px bg-slate-800"></div>
+
+                        {/* Checkboxes */}
+                        <label className="flex items-center space-x-2 cursor-pointer text-slate-300 hover:text-white select-none">
+                            <input 
+                                type="checkbox" 
+                                className="w-4 h-4 rounded text-cyan-500 bg-slate-950 border-slate-700 focus:ring-cyan-500 focus:ring-offset-slate-900"
+                                checked={showRiskZones} 
+                                onChange={(e) => setShowRiskZones(e.target.checked)} 
+                            />
+                            <span className="font-medium">Cyclone Alert Hotspots</span>
+                        </label>
+
+                        <label className="flex items-center space-x-2 cursor-pointer text-slate-300 hover:text-white select-none">
+                            <input 
+                                type="checkbox" 
+                                className="w-4 h-4 rounded text-emerald-500 bg-slate-950 border-slate-700 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                                checked={showArgo} 
+                                onChange={(e) => setShowArgo(e.target.checked)} 
+                            />
+                            <span className="font-medium">Argo Float Markers</span>
+                        </label>
+                    </div>
+
+                    {/* Quick Preset Coordinates */}
+                    <div className="flex items-center space-x-2 text-xs">
+                        <span className="text-slate-500">Quick Spot:</span>
+                        <select 
+                            onChange={(e) => {
+                                const idx = e.target.value;
+                                if (idx !== "") onSelectLocation(quickLocations[idx]);
+                            }}
+                            defaultValue=""
+                            className="bg-slate-950 text-slate-300 border border-slate-800 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-cyan-500"
+                        >
+                            <option value="" disabled>Select Target Basin...</option>
+                            {quickLocations.map((loc, i) => (
+                                <option key={i} value={i}>{loc.name} ({loc.lat}°N, {loc.lon}°E)</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+            );
+        };
+
+        // -------------------------------------------------------------------
+        // 2D LEAFLET OCEAN MAP
+        // -------------------------------------------------------------------
+        const OceanMap = ({ 
+            surfaceData, tchpData, activeOverlay, 
+            showArgo, argoData, 
+            showRiskZones,
+            selectedCoord, onMapClick,
+            selectedArgo, onSelectArgo
+        }) => {
+            const mapContainerRef = useRef(null);
+            const mapRef = useRef(null);
+            const heatLayerRef = useRef(null);
+            const argoLayerRef = useRef(null);
+            const riskZonesLayerRef = useRef(null);
+            const markerRef = useRef(null);
+
+            // Initialize Map
+            useEffect(() => {
+                if (!mapRef.current && mapContainerRef.current) {
+                    const map = L.map(mapContainerRef.current, {
+                        center: [15.0, 78.5],
+                        zoom: 5,
+                        minZoom: 4,
+                        maxZoom: 9,
+                        zoomControl: true,
+                    });
+
+                    L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}{r}.png', {
+                        attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
+                        subdomains: 'abcd',
+                        maxZoom: 19
+                    }).addTo(map);
+
+                    // Domain boundary bounds rectangle
+                    const bounds = [[5.0, 60.0], [25.0, 95.0]];
+                    L.rectangle(bounds, {
+                        color: "#06b6d4",
+                        weight: 1,
+                        fill: false,
+                        dashArray: "4, 6",
+                        opacity: 0.5
+                    }).addTo(map);
+
+                    map.on('click', (e) => {
+                        const lat = parseFloat(e.latlng.lat.toFixed(3));
+                        const lon = parseFloat(e.latlng.lng.toFixed(3));
+                        // Clamp to domain
+                        if (lat >= 5.0 && lat <= 25.0 && lon >= 60.0 && lon <= 95.0) {
+                            onMapClick({ lat, lon });
+                        }
+                    });
+
+                    mapRef.current = map;
+                }
+            }, [onMapClick]);
+
+            // Heatmap layer for SST or TCHP
+            useEffect(() => {
+                if (!mapRef.current) return;
+                
+                if (heatLayerRef.current) {
+                    mapRef.current.removeLayer(heatLayerRef.current);
+                    heatLayerRef.current = null;
+                }
+
+                const heatData = [];
+                let options = { radius: 18, blur: 24, maxZoom: 8 };
+
+                if (activeOverlay === 'sst' && surfaceData?.sst && surfaceData?.lats && surfaceData?.lons) {
+                    const { lats, lons, sst } = surfaceData;
+                    const stepLat = Math.max(1, Math.floor(lats.length / 45));
+                    const stepLon = Math.max(1, Math.floor(lons.length / 45));
+
+                    for (let i = 0; i < lats.length; i += stepLat) {
+                        const row = sst[i];
+                        if (!row) continue;
+                        for (let j = 0; j < lons.length; j += stepLon) {
+                            const val = row[j];
+                            if (val === undefined || val === null) continue;
+                            // Scale 24°C to 31°C
+                            const intensity = Math.max(0.1, Math.min(1.0, (val - 24.0) / 7.0));
+                            heatData.push([lats[i], lons[j], intensity]);
+                        }
+                    }
+                    options.gradient = {
+                        0.2: '#1d4ed8', // blue
+                        0.4: '#06b6d4', // cyan
+                        0.6: '#10b981', // green
+                        0.8: '#f59e0b', // amber
+                        1.0: '#ef4444'  // red
+                    };
+                } else if (activeOverlay === 'tchp' && tchpData?.tchp && tchpData?.lats && tchpData?.lons) {
+                    const { lats, lons, tchp } = tchpData;
+                    for (let i = 0; i < lats.length; i++) {
+                        const row = tchp[i];
+                        if (!row) continue;
+                        for (let j = 0; j < lons.length; j++) {
+                            const val = row[j];
+                            if (val === undefined || val === null || val <= 5.0) continue;
+                            // Scale 0 to 100 kJ/cm²
+                            const intensity = Math.max(0.1, Math.min(1.0, val / 95.0));
+                            heatData.push([lats[i], lons[j], intensity]);
+                        }
+                    }
+                    options.gradient = {
+                        0.3: '#047857', // emerald
+                        0.5: '#facc15', // yellow
+                        0.7: '#f97316', // orange
+                        0.9: '#ef4444', // red
+                        1.0: '#b91c1c'  // deep crimson
+                    };
+                }
+
+                if (heatData.length > 0 && window.L?.heatLayer) {
+                    heatLayerRef.current = L.heatLayer(heatData, options).addTo(mapRef.current);
+                }
+            }, [surfaceData, tchpData, activeOverlay]);
+
+            // High-Risk TCHP zones markers
+            useEffect(() => {
+                if (!mapRef.current) return;
+
+                if (riskZonesLayerRef.current) {
+                    mapRef.current.removeLayer(riskZonesLayerRef.current);
+                    riskZonesLayerRef.current = null;
+                }
+
+                if (showRiskZones && tchpData?.high_risk_zones) {
+                    const group = L.layerGroup();
+                    tchpData.high_risk_zones.forEach(zone => {
+                        const isCritical = zone.severity === 'Critical';
+                        const ringColor = isCritical ? '#f43f5e' : '#f97316';
+                        
+                        const icon = L.divIcon({
+                            className: 'risk-hotspot-icon',
+                            html: `
+                                <div style="position:relative; width:26px; height:26px;">
+                                    <div class="pulse-marker" style="position:absolute; width:26px; height:26px; border-radius:50%; background-color:${ringColor}; opacity:0.4;"></div>
+                                    <div style="position:absolute; top:5px; left:5px; width:16px; height:16px; border-radius:50%; background-color:${ringColor}; border:2px solid #ffffff; display:flex; align-items:center; justify-content:center; box-shadow:0 0 8px ${ringColor};">
+                                        <span style="font-size:9px; font-weight:bold; color:white;">!</span>
+                                    </div>
+                                </div>
+                            `,
+                            iconSize: [26, 26],
+                            iconAnchor: [13, 13]
+                        });
+
+                        const marker = L.marker([zone.lat, zone.lon], { icon });
+                        marker.bindPopup(`
+                            <div style="background:#0f172a; color:#f8fafc; padding:8px 10px; border-radius:8px; border:1px solid #334155; font-family:sans-serif; min-width:180px;">
+                                <div style="font-size:12px; font-weight:bold; color:${ringColor}; margin-bottom:4px;">
+                                    ⚠️ ${zone.risk_status}
+                                </div>
+                                <div style="font-size:11px; color:#94a3b8; margin-bottom:6px;">${zone.label}</div>
+                                <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+                                    <span>TCHP:</span>
+                                    <strong style="color:#ffffff;">${zone.tchp_value} kJ/cm²</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+                                    <span>Isotherm D26:</span>
+                                    <strong style="color:#ffffff;">${zone.d26} m</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:11px;">
+                                    <span>Mixed Layer (MLD):</span>
+                                    <strong style="color:#ffffff;">${zone.mld} m</strong>
+                                </div>
+                                <div style="margin-top:8px; padding-top:6px; border-top:1px solid #1e293b; font-size:10px; color:#06b6d4; text-align:center;">
+                                    Click map nearby to inspect profile
+                                </div>
+                            </div>
+                        `);
+                        marker.on('click', () => {
+                            onMapClick({ lat: zone.lat, lon: zone.lon });
+                        });
+                        marker.addTo(group);
+                    });
+                    group.addTo(mapRef.current);
+                    riskZonesLayerRef.current = group;
+                }
+            }, [showRiskZones, tchpData, onMapClick]);
+
+            // Argo Float Markers
+            useEffect(() => {
+                if (!mapRef.current) return;
+
+                if (argoLayerRef.current) {
+                    mapRef.current.removeLayer(argoLayerRef.current);
+                    argoLayerRef.current = null;
+                }
+
+                if (showArgo && argoData?.floats) {
+                    const group = L.layerGroup();
+                    argoData.floats.forEach(f => {
+                        const isPass = f.rmse < 1.0;
+                        const isSelected = selectedArgo?.id === f.id;
+                        const color = isPass ? '#10b981' : '#f59e0b';
+
+                        const marker = L.circleMarker([f.lat, f.lon], {
+                            radius: isSelected ? 8 : 6,
+                            fillColor: color,
+                            color: isSelected ? '#38bdf8' : '#ffffff',
+                            weight: isSelected ? 3 : 1.5,
+                            opacity: 1,
+                            fillOpacity: 0.9
+                        });
+
+                        marker.bindPopup(`
+                            <div style="background:#0f172a; color:#f8fafc; padding:8px 10px; border-radius:8px; border:1px solid #334155; font-family:sans-serif; min-width:180px;">
+                                <div style="font-size:12px; font-weight:bold; color:#38bdf8; margin-bottom:4px;">
+                                    🛰️ Argo Float: ${f.id}
+                                </div>
+                                <div style="font-size:11px; color:#94a3b8; margin-bottom:6px;">
+                                    ${f.lat.toFixed(2)}°N, ${f.lon.toFixed(2)}°E
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+                                    <span>Profile RMSE:</span>
+                                    <strong style="color:${isPass ? '#4ade80' : '#fbbf24'};">${f.rmse.toFixed(2)} °C</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:4px;">
+                                    <span>Profile MAE:</span>
+                                    <strong style="color:#ffffff;">${f.mae.toFixed(2)} °C</strong>
+                                </div>
+                                <div style="font-size:10px; font-weight:bold; color:${isPass ? '#4ade80' : '#fbbf24'};">
+                                    ${isPass ? '✓ Model Precision Validated (RMSE < 1.0°C)' : '⚠️ Moderate Uncertainty Float'}
+                                </div>
+                                <div style="margin-top:8px; padding-top:6px; border-top:1px solid #1e293b; font-size:10px; color:#06b6d4; text-align:center;">
+                                    Click to load Ground Truth Comparison
+                                </div>
+                            </div>
+                        `);
+
+                        marker.on('click', () => {
+                            onSelectArgo(f);
+                            onMapClick({ lat: f.lat, lon: f.lon });
+                        });
+
+                        marker.addTo(group);
+                    });
+                    group.addTo(mapRef.current);
+                    argoLayerRef.current = group;
+                }
+            }, [showArgo, argoData, selectedArgo, onSelectArgo, onMapClick]);
+
+            // Selected Coordinate Pin Marker
+            useEffect(() => {
+                if (!mapRef.current) return;
+
+                if (markerRef.current) {
+                    mapRef.current.removeLayer(markerRef.current);
+                    markerRef.current = null;
+                }
+
+                if (selectedCoord) {
+                    const icon = L.divIcon({
+                        className: 'selection-pin',
+                        html: `
+                            <div style="position:relative; width:20px; height:20px;">
+                                <div style="position:absolute; width:20px; height:20px; border-radius:50%; background-color:#06b6d4; opacity:0.4;" class="pulse-marker"></div>
+                                <div style="position:absolute; top:3px; left:3px; width:14px; height:14px; border-radius:50%; background-color:#06b6d4; border:2px solid #ffffff; box-shadow:0 0 10px #06b6d4;"></div>
+                            </div>
+                        `,
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    });
+
+                    markerRef.current = L.marker([selectedCoord.lat, selectedCoord.lon], { icon }).addTo(mapRef.current);
+                }
+            }, [selectedCoord]);
+
+            return (
+                <div className="relative w-full h-[520px] rounded-xl overflow-hidden border border-slate-800 shadow-2xl z-0">
+                    <div ref={mapContainerRef} className="w-full h-full"></div>
+                    
+                    {/* Floating Legend */}
+                    <div className="absolute bottom-4 left-4 z-[400] bg-slate-900/90 backdrop-blur border border-slate-800 p-3 rounded-xl shadow-2xl text-xs pointer-events-none">
+                        <div className="font-bold text-slate-200 mb-1.5 flex items-center justify-between">
+                            <span>{activeOverlay === 'sst' ? 'Sea Surface Temperature (SST)' : 'Cyclone Heat Potential (TCHP)'}</span>
+                        </div>
+                        <div 
+                            className="w-44 h-3 rounded-full shadow-inner" 
+                            style={{
+                                backgroundImage: activeOverlay === 'sst' 
+                                    ? 'linear-gradient(to right, #1d4ed8, #06b6d4, #10b981, #f59e0b, #ef4444)' 
+                                    : 'linear-gradient(to right, #047857, #facc15, #f97316, #ef4444, #b91c1c)'
+                            }}
+                        />
+                        <div className="flex justify-between mt-1 text-[11px] font-mono text-slate-400">
+                            <span>{activeOverlay === 'sst' ? '24.0°C' : '0 kJ/cm²'}</span>
+                            <span>{activeOverlay === 'sst' ? '27.5°C' : '50 (RI Alert)'}</span>
+                            <span>{activeOverlay === 'sst' ? '31.0°C+' : '100+ kJ/cm²'}</span>
+                        </div>
+                    </div>
+
+                    {/* Sub-Basin watermark tags */}
+                    <div className="absolute top-4 left-14 z-[400] pointer-events-none flex space-x-2">
+                        <span className="px-2.5 py-1 bg-slate-900/80 backdrop-blur text-slate-400 border border-slate-800 rounded-md text-[11px] font-medium">
+                            Arabian Sea (60°-78°E)
+                        </span>
+                        <span className="px-2.5 py-1 bg-slate-900/80 backdrop-blur text-slate-400 border border-slate-800 rounded-md text-[11px] font-medium">
+                            Bay of Bengal (80°-95°E)
+                        </span>
+                    </div>
+
+                    {/* Active pin coordinate indicator */}
+                    {selectedCoord && (
+                        <div className="absolute top-4 right-4 z-[400] bg-slate-900/90 backdrop-blur border border-cyan-500/40 px-3 py-1.5 rounded-lg shadow-xl text-xs font-mono text-cyan-300">
+                            🎯 Selected: {selectedCoord.lat.toFixed(2)}°N, {selectedCoord.lon.toFixed(2)}°E
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // -------------------------------------------------------------------
+        // SUBSURFACE DEPTH PROFILE VIEW (Plotly Depth vs Temp)
+        // -------------------------------------------------------------------
+        const DepthProfile = ({ data, coord, leadTime, selectedArgo, onClearArgo }) => {
+            const plotDivRef = useRef(null);
+
+            useEffect(() => {
+                if (!plotDivRef.current || !data) return;
+
+                const { depths, mean_temperature, lower_bound, upper_bound, mld, d26 } = data;
+
+                const traces = [];
+
+                // 95% Confidence Bounds (Upper + Lower shaded fill)
+                traces.push({
+                    x: upper_bound,
+                    y: depths,
+                    type: 'scatter',
+                    mode: 'lines',
+                    line: { width: 0, color: 'transparent' },
+                    showlegend: false,
+                    hoverinfo: 'skip',
+                    name: '95% Upper Bound'
+                });
+
+                traces.push({
+                    x: lower_bound,
+                    y: depths,
+                    type: 'scatter',
+                    mode: 'lines',
+                    fill: 'tonexty',
+                    fillcolor: 'rgba(6, 182, 212, 0.18)',
+                    line: { width: 0, color: 'transparent' },
+                    name: `Calibrated 90-95% CI (T+${leadTime}d)`,
+                    hoverinfo: 'x',
+                });
+
+                // Mean Prediction Line
+                traces.push({
+                    x: mean_temperature,
+                    y: depths,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    line: { color: '#06b6d4', width: 3.5, shape: 'spline' },
+                    marker: { size: 5, color: '#06b6d4' },
+                    name: 'OceanEmbed Forecast Mean',
+                    hovertemplate: 'Depth: %{y} m<br>Temp: %{x:.2f} °C<extra></extra>'
+                });
+
+                // Simulated Argo Float Ground Truth (if active)
+                if (selectedArgo && selectedArgo.observed) {
+                    traces.push({
+                        x: selectedArgo.observed,
+                        y: selectedArgo.depths || depths,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        line: { color: '#10b981', width: 2.5, dash: 'dashdot' },
+                        marker: { size: 7, symbol: 'diamond', color: '#10b981' },
+                        name: `Argo Ground Truth (${selectedArgo.id})`,
+                        hovertemplate: 'Depth: %{y} m<br>Observed: %{x:.2f} °C<extra></extra>'
+                    });
+                }
+
+                const shapes = [];
+                const annotations = [];
+
+                // MLD indicator
+                if (mld) {
+                    shapes.push({
+                        type: 'line',
+                        x0: 4,
+                        x1: 32,
+                        y0: mld,
+                        y1: mld,
+                        line: { color: '#f59e0b', width: 1.5, dash: 'dash' }
+                    });
+                    annotations.push({
+                        x: 28.5,
+                        y: mld,
+                        text: `MLD: ${mld}m`,
+                        showarrow: false,
+                        font: { color: '#f59e0b', size: 10 },
+                        bgcolor: 'rgba(15, 23, 42, 0.8)',
+                        bordercolor: '#f59e0b',
+                        borderwidth: 1
+                    });
+                }
+
+                // D26 isotherm indicator
+                if (d26 && d26 > 0) {
+                    shapes.push({
+                        type: 'line',
+                        x0: 26.0,
+                        x1: 26.0,
+                        y0: 0,
+                        y1: d26,
+                        line: { color: '#f43f5e', width: 1.5, dash: 'dot' }
+                    });
+                    annotations.push({
+                        x: 26.0,
+                        y: d26,
+                        text: `D26: ${d26}m`,
+                        showarrow: true,
+                        arrowhead: 2,
+                        arrowcolor: '#f43f5e',
+                        ax: 35,
+                        ay: -15,
+                        font: { color: '#f43f5e', size: 10 },
+                        bgcolor: 'rgba(15, 23, 42, 0.8)',
+                        bordercolor: '#f43f5e',
+                        borderwidth: 1
+                    });
+                }
+
+                const layout = {
+                    title: {
+                        text: `Thermal Profile (0–1000m) at ${coord ? `${coord.lat.toFixed(2)}°N, ${coord.lon.toFixed(2)}°E` : ''} • Lead Time T+${leadTime}d`,
+                        font: { color: '#f8fafc', size: 13, weight: 600 },
+                        x: 0.05
+                    },
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent',
+                    margin: { l: 55, r: 25, t: 45, b: 45 },
+                    xaxis: { 
+                        title: 'Temperature (°C)',
+                        titlefont: { size: 11, color: '#94a3b8' },
+                        tickfont: { size: 10, color: '#94a3b8' },
+                        gridcolor: '#1e293b',
+                        zerolinecolor: '#334155',
+                        range: [3.0, 32.0],
+                        dtick: 4
+                    },
+                    yaxis: { 
+                        title: 'Ocean Depth (m)',
+                        titlefont: { size: 11, color: '#94a3b8' },
+                        tickfont: { size: 10, color: '#94a3b8' },
+                        gridcolor: '#1e293b',
+                        zerolinecolor: '#334155',
+                        autorange: 'reversed',
+                        range: [1000, 0]
+                    },
+                    shapes,
+                    annotations,
+                    legend: {
+                        orientation: 'h',
+                        y: -0.15,
+                        x: 0.0,
+                        font: { color: '#cbd5e1', size: 10 },
+                        bgcolor: 'rgba(15, 23, 42, 0.6)'
+                    },
+                    hovermode: 'closest'
+                };
+
+                Plotly.react(plotDivRef.current, traces, layout, {
+                    responsive: true,
+                    displayModeBar: false
+                });
+
+            }, [data, coord, leadTime, selectedArgo]);
+
+            return (
+                <div className="bg-slate-900/90 rounded-xl border border-slate-800 h-[520px] shadow-2xl flex flex-col p-4 relative">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                        <div className="flex items-center space-x-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                            <h3 className="text-sm font-bold text-white tracking-wide">Vertical Thermocline Architecture</h3>
+                        </div>
+
+                        {selectedArgo && (
+                            <div className="flex items-center space-x-2 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-xs">
+                                <span className="text-emerald-400 font-semibold">Comparing {selectedArgo.id}</span>
+                                <span className="text-emerald-300 font-mono">RMSE: {selectedArgo.rmse?.toFixed(2)}°C</span>
+                                <button 
+                                    onClick={onClearArgo}
+                                    className="text-slate-400 hover:text-white ml-1 font-bold"
+                                    title="Close Argo comparison"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {!data ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-slate-500 space-y-3">
+                            <div className="p-4 rounded-full bg-slate-800/60 border border-slate-700/50">
+                                <svg className="w-10 h-10 text-cyan-500/60 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                                </svg>
+                            </div>
+                            <p className="text-sm font-medium">Click anywhere on the ocean map to forecast depth profile</p>
+                            <p className="text-xs text-slate-600">Resolves Mixed Layer (0-50m), Thermocline (50-200m) & Deep Ocean (to 1000m)</p>
+                        </div>
+                    ) : (
+                        <div className="flex-1 w-full h-full pt-2">
+                            <div ref={plotDivRef} className="w-full h-full"></div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // -------------------------------------------------------------------
+        // METOCEAN LOCAL POINT READOUT PANEL
+        // -------------------------------------------------------------------
+        const MetoceanReadout = ({ data }) => {
+            if (!data) return null;
+
+            return (
+                <div className="bg-slate-900/90 rounded-xl border border-slate-800 p-4 shadow-xl">
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center space-x-2">
+                            <span className="text-base">📍</span>
+                            <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                                In-Situ Point Hydrodynamics ({data.lat}°N, {data.lon}°E)
+                            </h3>
+                        </div>
+                        <span className="text-[11px] font-mono text-cyan-400 bg-slate-950 px-2.5 py-0.5 rounded border border-slate-800">
+                            Forecast Step: T+{data.lead_time}d
+                        </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-xs">
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <div className="text-slate-400 text-[10px] uppercase">Sea Surface Temp</div>
+                            <div className="text-sm font-bold text-cyan-400 mt-0.5">{data.sst?.toFixed(1)} °C</div>
+                        </div>
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <div className="text-slate-400 text-[10px] uppercase">Salinity (SSS)</div>
+                            <div className="text-sm font-bold text-emerald-400 mt-0.5">{data.sss?.toFixed(1)} PSU</div>
+                        </div>
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <div className="text-slate-400 text-[10px] uppercase">SSH Anomaly</div>
+                            <div className="text-sm font-bold text-blue-400 mt-0.5">{data.ssh > 0 ? `+${data.ssh}` : data.ssh} m</div>
+                        </div>
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <div className="text-slate-400 text-[10px] uppercase">Surface Wind</div>
+                            <div className="text-sm font-bold text-amber-400 mt-0.5">{data.wind_speed} m/s ({data.wind_dir}°)</div>
+                        </div>
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <div className="text-slate-400 text-[10px] uppercase">Current Velocity</div>
+                            <div className="text-sm font-bold text-indigo-400 mt-0.5">{data.current_speed} m/s</div>
+                        </div>
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <div className="text-slate-400 text-[10px] uppercase">Mixed Layer (MLD)</div>
+                            <div className="text-sm font-bold text-amber-400 mt-0.5">{data.mld?.toFixed(1)} m</div>
+                        </div>
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <div className="text-slate-400 text-[10px] uppercase">Isotherm D26</div>
+                            <div className="text-sm font-bold text-rose-400 mt-0.5">{data.d26?.toFixed(1)} m</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // -------------------------------------------------------------------
+        // CYCLONE HEAT POTENTIAL (TCHP) ALERT DRAWER
+        // -------------------------------------------------------------------
+        const TCHPAlertDrawer = ({ data, onInspectZone }) => {
+            const zones = data?.high_risk_zones || [];
+
+            const getBadge = (severity) => {
+                switch(severity?.toLowerCase()) {
+                    case 'critical':
+                        return 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse';
+                    case 'high':
+                        return 'bg-red-500/20 text-red-300 border-red-500/40';
+                    default:
+                        return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                }
+            };
+
+            return (
+                <div className="bg-slate-900/90 rounded-xl border border-slate-800 p-5 shadow-xl">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center space-x-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 font-bold">
+                                🌀
+                            </div>
+                            <div>
+                                <h2 className="text-base font-bold text-white flex items-center space-x-2">
+                                    <span>Tropical Cyclone Heat Potential Hazard Alerts</span>
+                                    <span className="text-xs px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                        TCHP &gt; 50 kJ/cm²
+                                    </span>
+                                </h2>
+                                <p className="text-xs text-slate-400">Flagged ocean areas with fuel capacity for Rapid Cyclone Intensification (RI)</p>
+                            </div>
+                        </div>
+                        <span className="text-xs font-mono text-rose-400 bg-slate-950 px-3 py-1 rounded-lg border border-slate-800">
+                            {zones.length} Active High-Energy Clusters
+                        </span>
+                    </div>
+
+                    {zones.length === 0 ? (
+                        <div className="text-slate-400 italic bg-slate-950/60 rounded-xl p-8 text-center border border-slate-800/80">
+                            No high-TCHP rapid intensification zones detected in this forecast window.
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {zones.map((z, i) => (
+                                <div 
+                                    key={i} 
+                                    className="bg-slate-950/80 hover:bg-slate-850/80 rounded-xl border border-slate-800 hover:border-rose-500/50 p-4 transition-all flex flex-col justify-between group cursor-pointer shadow-lg"
+                                    onClick={() => onInspectZone({ lat: z.lat, lon: z.lon })}
+                                >
+                                    <div>
+                                        <div className="flex justify-between items-start mb-2">
+                                            <span className="font-bold text-xs text-slate-200 group-hover:text-cyan-300 transition-colors">
+                                                {z.label}
+                                            </span>
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getBadge(z.severity)}`}>
+                                                {z.severity}
+                                            </span>
+                                        </div>
+                                        <div className="text-[11px] text-slate-400 mb-3 font-mono">
+                                            [{z.lat.toFixed(2)}°N, {z.lon.toFixed(2)}°E]
+                                        </div>
+
+                                        <div className="grid grid-cols-3 gap-2 py-2 px-2.5 bg-slate-900 rounded-lg border border-slate-800 text-center">
+                                            <div>
+                                                <div className="text-[10px] text-slate-500 uppercase">TCHP</div>
+                                                <div className="text-sm font-bold text-rose-400 font-mono">{z.tchp_value}</div>
+                                                <div className="text-[9px] text-slate-500">kJ/cm²</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] text-slate-500 uppercase">D26 Depth</div>
+                                                <div className="text-sm font-bold text-amber-400 font-mono">{z.d26}</div>
+                                                <div className="text-[9px] text-slate-500">meters</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] text-slate-500 uppercase">MLD</div>
+                                                <div className="text-sm font-bold text-cyan-400 font-mono">{z.mld}</div>
+                                                <div className="text-[9px] text-slate-500">meters</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-cyan-400 group-hover:text-cyan-300">
+                                        <span className="text-[11px] text-slate-400">Rapid Intensification Risk</span>
+                                        <span className="flex items-center space-x-1 font-medium">
+                                            <span>Inspect Profile</span>
+                                            <span>→</span>
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // -------------------------------------------------------------------
+        // ARGO OBSERVATION VALIDATION DRAWER
+        // -------------------------------------------------------------------
+        const ArgoValidationPanel = ({ data, onSelectFloat, selectedFloatId }) => {
+            if (!data) return null;
+            const { floats = [], aggregate = {} } = data;
+
+            return (
+                <div className="bg-slate-900/90 rounded-xl border border-slate-800 p-5 shadow-xl">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center space-x-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-bold">
+                                🛰️
+                            </div>
+                            <div>
+                                <h2 className="text-base font-bold text-white">Argo Float Physical Verification Benchmarks</h2>
+                                <p className="text-xs text-slate-400">Simulated autonomous profiling floats ground-truth accuracy verification</p>
+                            </div>
+                        </div>
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Mean RMSE: {aggregate.mean_rmse ? `${aggregate.mean_rmse.toFixed(2)} °C` : '--'}
+                        </span>
+                    </div>
+
+                    {/* Aggregate KPIs */}
+                    <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+                        <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                            <div className="text-[10px] text-slate-400 uppercase font-semibold">Aggregate RMSE</div>
+                            <div className="text-lg font-bold text-emerald-400 mt-0.5">{aggregate.mean_rmse?.toFixed(2) || '--'} °C</div>
+                            <div className="text-[10px] text-slate-500">Benchmark &lt; 1.0°C</div>
+                        </div>
+                        <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                            <div className="text-[10px] text-slate-400 uppercase font-semibold">Aggregate MAE</div>
+                            <div className="text-lg font-bold text-cyan-400 mt-0.5">{aggregate.mean_mae?.toFixed(2) || '--'} °C</div>
+                            <div className="text-[10px] text-slate-500">Mean Absolute Error</div>
+                        </div>
+                        <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                            <div className="text-[10px] text-slate-400 uppercase font-semibold">Active Fleet</div>
+                            <div className="text-lg font-bold text-white mt-0.5">{aggregate.n_floats || 0} Floats</div>
+                            <div className="text-[10px] text-slate-500">North Indian Ocean</div>
+                        </div>
+                    </div>
+
+                    {/* Table of Floats */}
+                    <div className="overflow-x-auto rounded-lg border border-slate-800 max-h-56 overflow-y-auto">
+                        <table className="w-full text-xs text-left">
+                            <thead className="bg-slate-950 text-slate-400 text-[10px] uppercase sticky top-0">
+                                <tr>
+                                    <th className="px-3 py-2">Float ID</th>
+                                    <th className="px-3 py-2">Location</th>
+                                    <th className="px-3 py-2">RMSE</th>
+                                    <th className="px-3 py-2">MAE</th>
+                                    <th className="px-3 py-2">Status</th>
+                                    <th className="px-3 py-2 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800">
+                                {floats.map((f, i) => {
+                                    const isSelected = selectedFloatId === f.id;
+                                    const isPass = f.rmse < 1.0;
+                                    return (
+                                        <tr 
+                                            key={i} 
+                                            className={`transition-colors ${
+                                                isSelected 
+                                                    ? 'bg-cyan-500/10 border-l-2 border-cyan-400' 
+                                                    : 'bg-slate-900/50 hover:bg-slate-850'
+                                            }`}
+                                        >
+                                            <td className="px-3 py-2 font-mono font-medium text-cyan-400">{f.id}</td>
+                                            <td className="px-3 py-2 text-slate-300">{f.lat?.toFixed(1)}°N, {f.lon?.toFixed(1)}°E</td>
+                                            <td className="px-3 py-2 font-mono text-white">{f.rmse?.toFixed(2)} °C</td>
+                                            <td className="px-3 py-2 font-mono text-slate-400">{f.mae?.toFixed(2)} °C</td>
+                                            <td className="px-3 py-2">
+                                                {isPass ? (
+                                                    <span className="text-emerald-400 font-bold text-[11px]">✓ PASS</span>
+                                                ) : (
+                                                    <span className="text-amber-400 font-bold text-[11px]">⚠ WARN</span>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button
+                                                    onClick={() => onSelectFloat(f)}
+                                                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-cyan-600 text-slate-300 hover:text-white transition-all text-[11px]"
+                                                >
+                                                    {isSelected ? 'Viewing' : 'Compare'}
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        // -------------------------------------------------------------------
+        // MAIN OCEANEMBED APPLICATION CONTAINER
+        // -------------------------------------------------------------------
+        const App = () => {
+            const [leadTime, setLeadTime] = useState(0);
+            const [activeOverlay, setActiveOverlay] = useState('sst');
+            const [showArgo, setShowArgo] = useState(true);
+            const [showRiskZones, setShowRiskZones] = useState(true);
+            const [selectedCoord, setSelectedCoord] = useState({ lat: 15.0, lon: 88.0 }); // Default to Central BoB
+            const [selectedArgo, setSelectedArgo] = useState(null);
+
+            const [surfaceData, setSurfaceData] = useState(null);
+            const [tchpData, setTchpData] = useState(null);
+            const [argoData, setArgoData] = useState(null);
+            const [subsurfaceData, setSubsurfaceData] = useState(null);
+
+            const [backendConnected, setBackendConnected] = useState(false);
+            const [exportingNc, setExportingNc] = useState(false);
+            const [error, setError] = useState(null);
+
+            const quickLocations = [
+                { name: "Central Bay of Bengal (Warm Core)", lat: 15.0, lon: 88.0 },
+                { name: "Northern Bay of Bengal (Bengal Basin)", lat: 19.5, lon: 89.0 },
+                { name: "Andaman Sea Basin", lat: 11.0, lon: 93.0 },
+                { name: "SE Arabian Sea (Mini Warm Pool)", lat: 9.5, lon: 74.0 },
+                { name: "Northern Arabian Sea (Gujarat)", lat: 21.0, lon: 66.0 },
+                { name: "Central Arabian Sea", lat: 16.0, lon: 65.0 },
+            ];
+
+            // Synthetic Fallback Generator for offline demo resilience
+            const getFallbackData = () => {
+                const lats = [];
+                for(let la = 5; la <= 25; la += 1) lats.push(la);
+                const lons = [];
+                for(let lo = 60; lo <= 95; lo += 1) lons.push(lo);
+
+                const sst = lats.map(lat => lons.map(lon => 30.0 - (lat - 5) * 0.15 + (lon > 80 ? 0.4 : 0)));
+                const tchp = lats.map(lat => lons.map(lon => lat < 18 && lon > 82 ? 65 + Math.random() * 20 : 35 + Math.random() * 15));
+
+                const high_risk_zones = [
+                    { lat: 15.0, lon: 88.0, tchp_value: 84.5, mld: 42.0, d26: 88.0, severity: 'Critical', risk_status: 'Severe Rapid Intensification Risk', label: 'Central Bay of Bengal (Warm Core Pool)' },
+                    { lat: 13.0, lon: 86.0, tchp_value: 78.2, mld: 45.0, d26: 84.0, severity: 'High', risk_status: 'Rapid Intensification Risk', label: 'South-Central Bay of Bengal' },
+                    { lat: 10.0, lon: 74.0, tchp_value: 68.0, mld: 52.0, d26: 76.0, severity: 'High', risk_status: 'Rapid Intensification Risk', label: 'South-Eastern Arabian Sea (Mini Warm Pool)' },
+                ];
+
+                const floats = [
+                    { id: 'ARGO-2901001', lat: 14.5, lon: 87.2, rmse: 0.62, mae: 0.48, observed: [29.8, 29.7, 29.5, 29.0, 24.2, 14.1, 8.5, 6.2, 4.8] },
+                    { id: 'ARGO-2901002', lat: 18.0, lon: 89.5, rmse: 0.74, mae: 0.55, observed: [28.5, 28.4, 28.2, 27.5, 22.8, 13.5, 8.1, 5.9, 4.6] },
+                    { id: 'ARGO-2901003', lat: 11.2, lon: 73.5, rmse: 0.58, mae: 0.44, observed: [29.5, 29.4, 29.2, 28.8, 23.5, 14.0, 8.4, 6.0, 4.7] },
+                    { id: 'ARGO-2901004', lat: 16.5, lon: 66.0, rmse: 0.81, mae: 0.63, observed: [27.9, 27.8, 27.5, 26.8, 21.9, 13.2, 7.9, 5.8, 4.5] },
+                ];
+
+                return {
+                    surface: { lats, lons, sst },
+                    tchp: { lats, lons, tchp, high_risk_zones },
+                    argo: { floats, aggregate: { mean_rmse: 0.69, mean_mae: 0.53, n_floats: 4 } }
+                };
+            };
+
+            // Fetch Main Surface, TCHP and Argo Data
+            const fetchData = async () => {
+                setError(null);
+                try {
+                    const [resSurface, resTchp, resArgo] = await Promise.all([
+                        fetch(`${API_BASE}/forecast/surface?lead_time=${leadTime}`),
+                        fetch(`${API_BASE}/hazards/tchp?lead_time=${leadTime}`),
+                        fetch(`${API_BASE}/validation/argo`)
+                    ]);
+
+                    if (resSurface.ok && resTchp.ok && resArgo.ok) {
+                        setSurfaceData(await resSurface.json());
+                        setTchpData(await resTchp.json());
+                        setArgoData(await resArgo.json());
+                        setBackendConnected(true);
+                    } else {
+                        throw new Error("One or more backend endpoints returned an error.");
+                    }
+                } catch (err) {
+                    console.warn("Backend connection notice:", err.message);
+                    setBackendConnected(false);
+                    const fallback = getFallbackData();
+                    setSurfaceData(fallback.surface);
+                    setTchpData(fallback.tchp);
+                    setArgoData(fallback.argo);
+                }
+            };
+
+            // Fetch Subsurface Profile for selected coordinate
+            const fetchSubsurface = async (coord) => {
+                try {
+                    const res = await fetch(`${API_BASE}/forecast/subsurface`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ lat: coord.lat, lon: coord.lon, lead_time: leadTime })
+                    });
+                    if (res.ok) {
+                        const json = await res.json();
+                        setSubsurfaceData(json);
+                    } else {
+                        throw new Error();
+                    }
+                } catch {
+                    // Fallback profile calculation
+                    const depths = [0, 10, 20, 50, 100, 200, 400, 700, 1000];
+                    const sst = 30.0 - (coord.lat - 5.0) * 0.15;
+                    const mean_temperature = depths.map(z => {
+                        return 5.0 + (sst - 5.0) * 0.5 * (1 - Math.tanh((z - 95.0) / 40.0));
+                    });
+                    const sigma = leadTime === 0 ? 0.3 : leadTime === 1 ? 0.5 : leadTime === 3 ? 0.8 : 1.2;
+                    setSubsurfaceData({
+                        lat: coord.lat,
+                        lon: coord.lon,
+                        lead_time: leadTime,
+                        depths,
+                        mean_temperature,
+                        lower_bound: mean_temperature.map(t => Math.max(3.8, t - 1.645 * sigma)),
+                        upper_bound: mean_temperature.map(t => Math.min(32.0, t + 1.645 * sigma)),
+                        sst,
+                        sss: coord.lon > 80 ? 33.2 : 35.8,
+                        ssh: 0.05,
+                        wind_speed: 7.2,
+                        wind_dir: 230,
+                        current_speed: 0.31,
+                        mld: 42.0,
+                        d26: 82.0
+                    });
+                }
+            };
+
+            // Export CF NetCDF Download Handler
+            const handleExportNetCDF = async () => {
+                setExportingNc(true);
+                try {
+                    const url = `${API_BASE}/forecast/export/netcdf?lead_time=${leadTime}`;
+                    const res = await fetch(url);
+                    if (!res.ok) throw new Error("Export failed");
+                    const blob = await res.blob();
+                    const downloadUrl = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = downloadUrl;
+                    a.download = `oceanembed_forecast_T${leadTime}d.nc`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(downloadUrl);
+                } catch (err) {
+                    alert("Could not export NetCDF file. Ensure backend is running.");
+                } finally {
+                    setExportingNc(false);
+                }
+            };
+
+            useEffect(() => {
+                fetchData();
+            }, [leadTime]);
+
+            useEffect(() => {
+                if (selectedCoord) {
+                    fetchSubsurface(selectedCoord);
+                }
+            }, [selectedCoord, leadTime]);
+
+            // Handlers
+            const handleMapClick = (coord) => {
+                setSelectedCoord(coord);
+            };
+
+            const handleSelectArgo = (argoFloat) => {
+                setSelectedArgo(argoFloat);
+                setSelectedCoord({ lat: argoFloat.lat, lon: argoFloat.lon });
+            };
+
+            const handleClearArgo = () => {
+                setSelectedArgo(null);
+            };
+
+            const handleInspectZone = (zoneCoord) => {
+                setSelectedCoord(zoneCoord);
+                setSelectedArgo(null);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            // Derived KPIs
+            const flatten = (arr) => arr ? arr.flat() : [];
+            const sstFlat = surfaceData?.sst ? flatten(surfaceData.sst) : [];
+            const maxSst = sstFlat.length ? Math.max(...sstFlat).toFixed(1) : '31.2';
+            const tchpFlat = tchpData?.tchp ? flatten(tchpData.tchp) : [];
+            const meanTchp = tchpFlat.length ? (tchpFlat.reduce((a, b) => a + b, 0) / tchpFlat.length).toFixed(1) : '54.5';
+            const highRiskCount = tchpData?.high_risk_zones?.length || 0;
+            const argoRmse = argoData?.aggregate?.mean_rmse?.toFixed(2) || '0.68';
+
+            return (
+                <div className="min-h-screen flex flex-col bg-slate-950 pb-12">
+                    <Header 
+                        backendConnected={backendConnected} 
+                        leadTime={leadTime} 
+                        onExportNetCDF={handleExportNetCDF}
+                        exportingNc={exportingNc}
+                    />
+
+                    <main className="max-w-[1720px] mx-auto p-4 md:p-6 space-y-5 w-full flex-1">
+                        {/* Metrics Bar */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <StatCard 
+                                title="Peak Surface Temperature" 
+                                value={maxSst} 
+                                unit="°C" 
+                                subtitle="North Indian Ocean basin peak"
+                                colorClass="text-rose-400"
+                                icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
+                            />
+                            <StatCard 
+                                title="Basin Mean TCHP" 
+                                value={meanTchp} 
+                                unit="kJ/cm²" 
+                                subtitle="Tropical Cyclone Heat Content"
+                                colorClass="text-amber-400"
+                                icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" /></svg>}
+                            />
+                            <StatCard 
+                                title="Rapid Intensification Hotspots" 
+                                value={highRiskCount} 
+                                unit="Zones" 
+                                subtitle="Exceeding 50 kJ/cm² RI threshold"
+                                colorClass="text-rose-500"
+                                icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+                            />
+                            <StatCard 
+                                title="Argo Verification RMSE" 
+                                value={argoRmse} 
+                                unit="°C" 
+                                subtitle="Ground truth accuracy verification"
+                                colorClass="text-emerald-400"
+                                icon={<svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+                            />
+                        </div>
+
+                        {/* Controls Toolbar */}
+                        <ControlPanel 
+                            leadTime={leadTime} 
+                            setLeadTime={setLeadTime}
+                            activeOverlay={activeOverlay} 
+                            setActiveOverlay={setActiveOverlay}
+                            showArgo={showArgo} 
+                            setShowArgo={setShowArgo}
+                            showRiskZones={showRiskZones}
+                            setShowRiskZones={setShowRiskZones}
+                            quickLocations={quickLocations}
+                            onSelectLocation={(loc) => {
+                                setSelectedCoord({ lat: loc.lat, lon: loc.lon });
+                                setSelectedArgo(null);
+                            }}
+                        />
+
+                        {/* In-Situ Metocean Point Readout */}
+                        <MetoceanReadout data={subsurfaceData} />
+
+                        {/* Main Spatial & Subsurface Visualizations */}
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                            <div className="lg:col-span-7">
+                                <OceanMap 
+                                    surfaceData={surfaceData}
+                                    tchpData={tchpData}
+                                    activeOverlay={activeOverlay}
+                                    showArgo={showArgo}
+                                    argoData={argoData}
+                                    showRiskZones={showRiskZones}
+                                    selectedCoord={selectedCoord}
+                                    onMapClick={handleMapClick}
+                                    selectedArgo={selectedArgo}
+                                    onSelectArgo={handleSelectArgo}
+                                />
+                            </div>
+                            <div className="lg:col-span-5">
+                                <DepthProfile 
+                                    data={subsurfaceData}
+                                    coord={selectedCoord}
+                                    leadTime={leadTime}
+                                    selectedArgo={selectedArgo}
+                                    onClearArgo={handleClearArgo}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Analytical & Safety Drawers */}
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                            <div className="lg:col-span-7">
+                                <TCHPAlertDrawer 
+                                    data={tchpData} 
+                                    onInspectZone={handleInspectZone} 
+                                />
+                            </div>
+                            <div className="lg:col-span-5">
+                                <ArgoValidationPanel 
+                                    data={argoData} 
+                                    onSelectFloat={handleSelectArgo}
+                                    selectedFloatId={selectedArgo?.id}
+                                />
+                            </div>
+                        </div>
+                    </main>
+
+                    {/* Footer */}
+                    <footer className="border-t border-slate-900 px-6 py-4 text-center text-xs text-slate-500">
+                        OceanEmbed Prototype Framework • Smart India Hackathon (SIH26066) • Team Geeks for weaks • Bay of Bengal & Arabian Sea Operational Domain
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
